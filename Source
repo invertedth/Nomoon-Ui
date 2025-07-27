@@ -8,9 +8,10 @@ local RunService = game:GetService("RunService")
 
 -- GUI Setup
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui")
+ScreenGui.Parent = game.Players.LocalPlayer:WaitForChild("PlayerGui", 5)
 ScreenGui.Name = "NoMoonUI"
 ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true -- Respect Roblox's topbar
 
 -- Theme Presets
 local Themes = {
@@ -30,7 +31,7 @@ function NoMoonUI:CreateWindow(config)
     window.LoadingSubtitle = config.LoadingSubtitle or "by YourName"
     window.KeySystem = config.KeySystem or false
     window.KeySettings = config.KeySettings or {Title = "Key System", Subtitle = "", Note = "", FileName = "NoMoonKey", SaveKey = true, Key = {"ExampleKey"}}
-    window.Theme = config.Theme or Themes.Midnight
+    window.Theme = Themes[config.Theme] or Themes.Midnight -- Validate theme
 
     -- Main Frame
     local MainFrame = Instance.new("Frame")
@@ -43,7 +44,6 @@ function NoMoonUI:CreateWindow(config)
     -- Title
     local TitleLabel = Instance.new("TextLabel")
     TitleLabel.Size = UDim2.new(1, 0, 0, 30)
-    TitleLabel.Position = UDim2.new(0, 0, 0, 0)
     TitleLabel.BackgroundColor3 = window.Theme[2]
     TitleLabel.Text = window.Name .. (window.Subtitle ~= "" and " - " .. window.Subtitle or "")
     TitleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -51,14 +51,18 @@ function NoMoonUI:CreateWindow(config)
     TitleLabel.TextSize = 20
     TitleLabel.Parent = MainFrame
 
-    -- Draggable
+    -- Draggable with throttling
     local dragging, dragInput, dragStart, startPos
+    local lastUpdate = 0
     local function updateInput(input)
+        local currentTime = tick()
+        if currentTime - lastUpdate < 0.016 then return end -- Throttle to ~60 FPS
+        lastUpdate = currentTime
         local delta = input.Position - dragStart
         MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
     end
     TitleLabel.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             dragStart = input.Position
             startPos = MainFrame.Position
@@ -70,7 +74,7 @@ function NoMoonUI:CreateWindow(config)
         end
     end)
     TitleLabel.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
             dragInput = input
         end
     end)
@@ -89,6 +93,7 @@ function NoMoonUI:CreateWindow(config)
 
     local TabLayout = Instance.new("UIListLayout")
     TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    TabLayout.Padding = UDim.new(0, 5)
     TabLayout.Parent = TabContainer
 
     -- Content Area
@@ -96,6 +101,7 @@ function NoMoonUI:CreateWindow(config)
     ContentArea.Size = UDim2.new(1, -150, 1, -30)
     ContentArea.Position = UDim2.new(0, 150, 0, 30)
     ContentArea.BackgroundTransparency = 1
+    ContentArea.ClipsDescendants = true -- Prevent overflow
     ContentArea.Parent = MainFrame
 
     window.Tabs = {}
@@ -135,14 +141,22 @@ function NoMoonUI:CreateWindow(config)
 
         KeyButton.MouseButton1Click:Connect(function()
             local inputKey = KeyInput.Text
-            for _, key in ipairs(window.KeySettings.Key) do
-                if inputKey == key then
-                    KeyFrame:Destroy()
-                    MainFrame.Visible = true
-                    return
+            local success, result = pcall(function()
+                for _, key in ipairs(window.KeySettings.Key) do
+                    if inputKey == key then
+                        KeyFrame:Destroy()
+                        MainFrame.Visible = true
+                        return true
+                    end
                 end
+                return false
+            end)
+            if not success then
+                KeyInput.Text = "Error checking key"
+                warn("Key system error: " .. result)
+            elseif not result then
+                KeyInput.Text = "Invalid Key"
             end
-            KeyInput.Text = "Invalid Key"
         end)
 
         MainFrame.Visible = false
@@ -160,6 +174,8 @@ function NoMoonUI:CreateWindow(config)
         TabButton.Text = tab.Name
         TabButton.BackgroundColor3 = window.Theme[2]
         TabButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+        TabButton.TextSize = 14
+        TabButton.Font = Enum.Font.SourceSans
         TabButton.Parent = TabContainer
 
         local TabFrame = Instance.new("Frame")
@@ -183,9 +199,10 @@ function NoMoonUI:CreateWindow(config)
 
         function tab:CreateSection(name)
             local section = Instance.new("Frame")
-            section.Size = UDim2.new(1, -10, 0, 100)
+            section.Size = UDim2.new(1, -10, 0, 0) -- Auto-height
             section.Position = UDim2.new(0, 5, 0, 0)
             section.BackgroundColor3 = window.Theme[2]
+            section.SizeConstraint = Enum.SizeConstraint.RelativeXX
             section.Parent = TabFrame
 
             local SectionTitle = Instance.new("TextLabel")
@@ -200,19 +217,26 @@ function NoMoonUI:CreateWindow(config)
             SectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
             SectionLayout.Padding = UDim.new(0, 5)
             SectionLayout.Parent = section
+            SectionLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                section.Size = UDim2.new(1, -10, 0, SectionLayout.AbsoluteContentSize.Y + 10)
+            end)
 
             function section:CreateButton(config)
                 local button = Instance.new("TextButton")
                 button.Size = UDim2.new(1, -10, 0, 30)
-                button.Position = UDim2.new(0, 5, 0, 0)
                 button.Text = config.Name or "Button"
                 button.BackgroundColor3 = window.Theme[3]
                 button.TextColor3 = Color3.fromRGB(255, 255, 255)
+                button.TextSize = 14
+                button.Font = Enum.Font.SourceSans
                 button.Parent = section
 
                 button.MouseButton1Click:Connect(function()
                     if config.Callback then
-                        config.Callback()
+                        local success, err = pcall(config.Callback)
+                        if not success then
+                            warn("Button callback error: " .. err)
+                        end
                     end
                 end)
             end
@@ -220,15 +244,16 @@ function NoMoonUI:CreateWindow(config)
             function section:CreateLabel(config)
                 local label = Instance.new("TextLabel")
                 label.Size = UDim2.new(1, -10, 0, 20)
-                label.Position = UDim2.new(0, 5, 0, 0)
                 label.Text = config.Text or "Label"
                 label.BackgroundTransparency = 1
                 label.TextColor3 = Color3.fromRGB(255, 255, 255)
                 label.TextSize = 14
+                label.Font = Enum.Font.SourceSans
+                label.TextXAlignment = Enum.TextXAlignment.Left
                 label.Parent = section
 
                 function label:Set(text)
-                    label.Text = text
+                    label.Text = tostring(text)
                 end
 
                 return label
@@ -268,10 +293,11 @@ function NoMoonUI:CreateWindow(config)
         NotificationContent.TextColor3 = Color3.fromRGB(255, 255, 255)
         NotificationContent.TextSize = 14
         NotificationContent.TextWrapped = true
+        NotificationContent.TextXAlignment = Enum.TextXAlignment.Left
         NotificationContent.Parent = notification
 
-        spawn(function()
-            wait(config.Duration or 5)
+        task.spawn(function()
+            task.wait(config.Duration or 5)
             notification:Destroy()
         end)
     end
@@ -305,8 +331,8 @@ function NoMoonUI:CreateWindow(config)
         LoadingSubtitle.TextSize = 16
         LoadingSubtitle.Parent = LoadingFrame
 
-        spawn(function()
-            wait(2)
+        task.spawn(function()
+            task.wait(2)
             LoadingFrame:Destroy()
             MainFrame.Visible = true
         end)
